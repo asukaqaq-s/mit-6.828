@@ -180,7 +180,7 @@ mem_init(void)
 	check_page_alloc();
     // panic("fuck, i have not finished");
 	check_page();
-    panic("mem_init: This function is not finished\n");
+    
 
 	//////////////////////////////////////////////////////////////////////
 	// Now we set up virtual memory
@@ -192,8 +192,14 @@ mem_init(void)
 	//      (ie. perm = PTE_U | PTE_P)
 	//    - pages itself -- kernel RW, user NONE
 	// Your code goes here:
-    
 
+    // Asuka: pages is the virtual address of physical_page_address
+    // remember that pages is in the KERNEBASE above. 
+    // this is a remapping of pages to UPAGES so we don't need to alloc physical page
+    boot_map_region(kern_pgdir, UPAGES, npages * sizeof(struct PageInfo), 
+                    (physaddr_t)(ROUNDDOWN(PADDR(pages), PGSIZE)), PTE_U | PTE_P); 
+    
+    
 	//////////////////////////////////////////////////////////////////////
 	// Use the physical memory that 'bootstack' refers to as the kernel
 	// stack.  The kernel stack grows down from virtual address KSTACKTOP.
@@ -205,6 +211,14 @@ mem_init(void)
 	//       overwrite memory.  Known as a "guard page".
 	//     Permissions: kernel RW, user NONE
 	// Your code goes here:
+    
+
+    // Asuka: bootstack - bootstacktop is 32KB, equal to 8*PGSIZE
+    // so we don't need to alloc ppage, just remapping
+    size_t stk_region = KSTACKTOP - KSTKSIZE;
+    boot_map_region(kern_pgdir, stk_region, KSTKSIZE,
+                    (physaddr_t)(PADDR(bootstack)), PTE_W);
+
 
 	//////////////////////////////////////////////////////////////////////
 	// Map all of physical memory at KERNBASE.
@@ -215,8 +229,18 @@ mem_init(void)
 	// Permissions: kernel RW, user NONE
 	// Your code goes here:
 
+    // Asuka: mapping the first 256MB of PMEM
+    // this action will replace temporary_page_table which is only 4mb size
+    // the prev_page_table is defined in entrypgdir.c
+    long long four_gb = (1ll << 32);
+    boot_map_region(kern_pgdir, KERNBASE, four_gb - KERNBASE,
+                    0, PTE_W);
+
+
+    
 	// Check that the initial page directory has been set up correctly.
 	check_kern_pgdir();
+    // panic("mem_init: This function is not finished\n");
 
 	// Switch from the minimal entry page directory to the full kern_pgdir
 	// page table we just created.	Our instruction pointer should be
@@ -421,7 +445,10 @@ pgdir_walk(pde_t *pgdir, const void *va, int create)
         *pde_ptr = page2pa(p) | PTE_P | PTE_W | PTE_U;
         pg_table = (pte_t *)(PTE_ADDR(*pde_ptr) + KERNBASE); // DON'T forget * 
         pte_ptr = &pg_table[pte_num];
-        p->pp_ref ++; // if create success, ref_count ++
+
+        // if create success, ref_count ++
+        // the pde should init and 
+        p->pp_ref ++; 
     }
     
 	return pte_ptr;
@@ -442,12 +469,13 @@ static void
 boot_map_region(pde_t *pgdir, uintptr_t va, size_t size, physaddr_t pa, int perm)
 {
 	size_t _va, _pa, i, cnt;
-    cnt = size / PGSIZE;
+    cnt = (ROUNDUP(size, PGSIZE)) / PGSIZE;
     
     for (_va = va, _pa = pa, i = 0; i < cnt; i++) {
         pte_t *pte;
         
         if ((pte = pgdir_walk(pgdir, (void*)_va, 1)) == NULL) {
+            panic("boot_map_region: error!!!");
             return;
         }          
 
@@ -762,9 +790,9 @@ check_kern_pgdir(void)
 
 	// check pages array
 	n = ROUNDUP(npages*sizeof(struct PageInfo), PGSIZE);
-	for (i = 0; i < n; i += PGSIZE)
-		assert(check_va2pa(pgdir, UPAGES + i) == PADDR(pages) + i);
-
+	for (i = 0; i < n; i += PGSIZE) {
+        assert(check_va2pa(pgdir, UPAGES + i) == PADDR(pages) + i);
+    }
 
 	// check phys mem
 	for (i = 0; i < npages * PGSIZE; i += PGSIZE)
