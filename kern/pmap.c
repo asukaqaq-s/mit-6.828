@@ -178,7 +178,6 @@ mem_init(void)
 
 	check_page_free_list(1);
 	check_page_alloc();
-    // panic("fuck, i have not finished");
 	check_page();
     
 
@@ -303,6 +302,7 @@ page_init(void)
     // (2) Mapping the rest of base memory
     size_t i;
     size_t cnt;
+    
     for (i = 1; i < npages_basemem; i++) {
         pages[i].pp_ref = 0;
         pages[i].pp_link = page_free_list;
@@ -431,7 +431,8 @@ pgdir_walk(pde_t *pgdir, const void *va, int create)
     // if we have created it before, just return pte_ptr
     if (*pde_ptr & PTE_P) {
         // pgtable is multiple of pgsize, so low 12bits are 0.
-        pg_table = (pte_t *)(PTE_ADDR(*pde_ptr) + KERNBASE);
+        // PTE_ADDR gets the first 20 bits of this pde.
+        pg_table = (pte_t *)(KADDR(PTE_ADDR(*pde_ptr)));
         pte_ptr = &pg_table[pte_num];
         
     }
@@ -442,12 +443,12 @@ pgdir_walk(pde_t *pgdir, const void *va, int create)
         }
 
         // more permissive
+        // update the pde
         *pde_ptr = page2pa(p) | PTE_P | PTE_W | PTE_U;
-        pg_table = (pte_t *)(PTE_ADDR(*pde_ptr) + KERNBASE); // DON'T forget * 
+        pg_table = (pte_t *)(KADDR(PTE_ADDR(*pde_ptr))); // DON'T forget * 
         pte_ptr = &pg_table[pte_num];
 
         // if create success, ref_count ++
-        // the pde should init and 
         p->pp_ref ++; 
     }
     
@@ -568,12 +569,16 @@ page_lookup(pde_t *pgdir, void *va, pte_t **pte_store)
         return NULL;    
     }
 
-    pa = PTE_ADDR(*pte);
-    page = pa2page(pa);
-    
     if (pte_store) {
         *pte_store = pte;
     }
+
+    if (!(*pte & PTE_P)) {
+        return NULL;
+    }
+
+    pa = PTE_ADDR(*pte);
+    page = pa2page(pa);
     return page;
 }
 
@@ -609,9 +614,7 @@ page_remove(pde_t *pgdir, void *va)
     *pte &= 0xfff;
     *pte &= ~(PTE_P);
     page_decref(page);
-    if (page->pp_ref == 0) {
-        tlb_invalidate(pgdir, va);
-    }    
+    tlb_invalidate(pgdir, va);
 }
 
 //
