@@ -58,14 +58,47 @@ static const char *trapname(int trapno)
 	return "(unknown trap)";
 }
 
+void vector0();
+void vector1();
+void vector2();
+void vector3();
+void vector4();
+void vector5();
+void vector6();
+void vector7();
+void vector8();
+void vector9();
+void vector10();
+void vector11();
+void vector12();
+void vector13();
+void vector14();
+void vector15();
+void vector16();
+void vector17();
+void vector18();
+void vector19();
+void vector48();
 
 void
 trap_init(void)
 {
 	extern struct Segdesc gdt[];
 
-	// LAB 3: Your code here.
+	void *ptr[] = {vector0, vector1, vector2, vector3,
+				   vector4, vector5, vector6, vector7,
+				   vector8, vector9, vector10, vector11,
+				   vector12, vector13, vector14, vector15,
+				   vector16, vector17, vector18, vector19};
 
+	// LAB 3: Your code here.
+	for (size_t i = 0;i < 20; i++) {
+		cprintf("i = %d, addr = %p\n", i, ptr[i]);
+		SETGATE(idt[i], true, GD_KT, (uint32_t)ptr[i], 0);
+	}
+
+	// see GD_KT, it's a segment selector
+	SETGATE(idt[48], false, GD_KT, (uint32_t)vector48, 0);
 	// Per-CPU setup 
 	trap_init_percpu();
 }
@@ -157,7 +190,7 @@ trap_dispatch(struct Trapframe *tf)
 
 void
 trap(struct Trapframe *tf)
-{
+{	
 	// The environment may have set DF and some versions
 	// of GCC rely on DF being clear
 	asm volatile("cld" ::: "cc");
