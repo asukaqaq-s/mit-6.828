@@ -47,10 +47,47 @@
 /*
  * Lab 3: Your code here for generating entry points for the different traps.
  */
-
-
+.global _alltraps
+TRAPHANDLER_NOEC(vector0, 0)
+TRAPHANDLER_NOEC(vector1, 1)
+TRAPHANDLER_NOEC(vector2, 2)
+TRAPHANDLER_NOEC(vector3, 3)
+TRAPHANDLER_NOEC(vector4, 4)
+TRAPHANDLER_NOEC(vector5, 5)
+TRAPHANDLER_NOEC(vector6, 6)
+TRAPHANDLER_NOEC(vector7, 7)
+TRAPHANDLER(vector8, 8)
+TRAPHANDLER_NOEC(vector9, 9)
+TRAPHANDLER(vector10, 10)
+TRAPHANDLER(vector11, 11)
+TRAPHANDLER(vector12, 12)
+TRAPHANDLER(vector13, 13)
+TRAPHANDLER(vector14, 14)
+TRAPHANDLER_NOEC(vector15, 15)
+TRAPHANDLER_NOEC(vector16, 16)
+TRAPHANDLER(vector17, 17)
+TRAPHANDLER_NOEC(vector18, 18)
+TRAPHANDLER_NOEC(vector19, 19)
+TRAPHANDLER_NOEC(vector48, 48)
 
 /*
  * Lab 3: Your code here for _alltraps
  */
+.global _alltraps
+_alltraps:
+	pushl %ds
+	pushl %es
+	pushal
+
+	movw $GD_KD, %ax
+	movw %ax, %ds
+	movw %ax, %es
+	
+	# esp is the address of trapframe
+	pushl %esp 
+	call trap
+	
+	# should not return
+
+
 

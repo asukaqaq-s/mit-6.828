@@ -120,6 +120,28 @@ env_init(void)
 	// Set up envs array
 	// LAB 3: Your code here.
 
+	// initalize all of the ENV structures in the envs array
+	// 1. mark all enviroments in envs as free
+	// 2. set their env_ids to 0
+	// 3. insert them into the env_free_list
+	struct Env* end = NULL;
+
+	for (size_t i = 0;i < NENV; i++) {
+		envs[i].env_status = ENV_FREE;
+		envs[i].env_id = 0;
+		
+		// insert into free list and insert into rear
+		if (env_free_list == NULL) {
+			env_free_list = &envs[i];
+			end = env_free_list;
+		} else {
+			end->env_link = &envs[i];
+			end = env_free_list;
+		}
+	}
+
+	// call this function, configures the segmentation hardware
+	// with separate segments for privilege level0 and level3
 	// Per-CPU part of the initialization
 	env_init_percpu();
 }
@@ -131,15 +153,21 @@ env_init_percpu(void)
 	lgdt(&gdt_pd);
 	// The kernel never uses GS or FS, so we leave those set to
 	// the user data segment.
+	// the fifth segment is user_data
 	asm volatile("movw %%ax,%%gs" : : "a" (GD_UD|3));
 	asm volatile("movw %%ax,%%fs" : : "a" (GD_UD|3));
+
+
 	// The kernel does use ES, DS, and SS.  We'll change between
 	// the kernel and user data segments as needed.
+	// the third segemnt is kernel_data
 	asm volatile("movw %%ax,%%es" : : "a" (GD_KD));
 	asm volatile("movw %%ax,%%ds" : : "a" (GD_KD));
 	asm volatile("movw %%ax,%%ss" : : "a" (GD_KD));
+	
 	// Load the kernel text segment into CS.
 	asm volatile("ljmp %0,$1f\n 1:\n" : : "i" (GD_KT));
+	
 	// For good measure, clear the local descriptor table (LDT),
 	// since we don't use it.
 	lldt(0);
@@ -182,6 +210,17 @@ env_setup_vm(struct Env *e)
 	//    - The functions in kern/pmap.h are handy.
 
 	// LAB 3: Your code here.
+	
+	// 1. clear all pde to avoid error
+	e->env_pgdir = (pde_t *)page2kva(p);
+	
+	// 2. copy mapping from kern_pgdir which above UTOP
+	memcpy(e->env_pgdir, kern_pgdir, PGSIZE);
+
+
+
+	// 3. incre ref_count of env_pgdir
+	p->pp_ref ++;
 
 	// UVPT maps the env's own page table read-only.
 	// Permissions: kernel R, user R
@@ -279,6 +318,25 @@ region_alloc(struct Env *e, void *va, size_t len)
 	//   'va' and 'len' values that are not page-aligned.
 	//   You should round va down, and round (va + len) up.
 	//   (Watch out for corner-cases!)
+	size_t va_begin = ROUNDDOWN((size_t)va, PGSIZE);
+	size_t va_end = ROUNDUP((size_t)va + len, PGSIZE);
+
+	if (va + len < va) {
+		panic("test!!!");
+	}
+	
+	for (;va_begin < va_end; va_begin+=PGSIZE) {
+		
+		struct PageInfo *p = NULL;
+		if (!(p = page_alloc(ALLOC_ZERO))) {
+			panic("allocate failed");	
+		}
+
+		// map virtual address to physical address
+		if (page_insert(e->env_pgdir, p, (void*)va_begin, PTE_U | PTE_W) != 0) {
+			panic("page insert failed!");
+		}
+	}
 }
 
 //
@@ -309,9 +367,12 @@ load_icode(struct Env *e, uint8_t *binary)
 	// Hints:
 	//  Load each program segment into virtual memory
 	//  at the address specified in the ELF segment header.
-	//  You should only load segments with ph->p_type == ELF_PROG_LOAD.
+	// 
+	//  You should only load segments with ph->p_type == ELF_PROG_LOAD. √
+	// 
 	//  Each segment's virtual address can be found in ph->p_va
-	//  and its size in memory can be found in ph->p_memsz.
+	//  and its size in memory can be found in ph->p_memsz.             √
+	// 
 	//  The ph->p_filesz bytes from the ELF binary, starting at
 	//  'binary + ph->p_offset', should be copied to virtual address
 	//  ph->p_va.  Any remaining memory bytes should be cleared to zero.
@@ -336,10 +397,45 @@ load_icode(struct Env *e, uint8_t *binary)
 
 	// LAB 3: Your code here.
 
+	// we have created a pgdir, so boot a binary file now
+	struct Proghdr *ph, *eph;
+	struct Elf *elf = (struct Elf*)binary;
+	
+	// test magic number like main.c
+	if (elf->e_magic != ELF_MAGIC) {
+		panic("test magic number failed!");
+	}
+
+	// load each program segment 
+	ph = (struct Proghdr *) (binary + elf->e_phoff);
+	eph = ph + elf->e_phnum;
+
+	for (; ph < eph; ph++) {
+
+		if (ph->p_type != ELF_PROG_LOAD) 
+			continue;
+		if (ph->p_memsz < ph->p_filesz) 
+			panic("memsz error!");
+		
+		// build mapping, i have used alloc_zero flag to clear all dirts
+		region_alloc(e, (void*)ph->p_va, ph->p_memsz);
+
+		memcpy((void *)ph->p_va, binary + ph->p_offset, ph->p_filesz);
+		memset((void *)ph->p_va + ph->p_filesz, 0, ph->p_memsz - ph->p_filesz);
+	}
+
+	// cr3 stores the physical address instead of virtual address
+	lcr3(PADDR(kern_pgdir));
+
+	// set entry point here
+	// cprintf("addr = %p start = %p \n", elf->e_entry,);panic("stop!");
+	e->env_tf.tf_eip = elf->e_entry;
+
 	// Now map one page for the program's initial stack
 	// at virtual address USTACKTOP - PGSIZE.
 
 	// LAB 3: Your code here.
+	region_alloc(e, (void*)(USTACKTOP - PGSIZE), PGSIZE);
 }
 
 //
@@ -352,7 +448,21 @@ load_icode(struct Env *e, uint8_t *binary)
 void
 env_create(uint8_t *binary, enum EnvType type)
 {
+	struct Env* e = NULL;
 	// LAB 3: Your code here.
+
+	// alloc a env from evns array
+	if (env_alloc(&e, 0) != 0) {
+		panic("alloc an env error!");
+	} 
+	
+	// set its env_type
+	e->env_type = type;
+
+	lcr3((uint32_t)(PADDR(e->env_pgdir)));
+	// loads the named elf binary
+	load_icode(e, binary);
+	
 }
 
 //
@@ -444,7 +554,7 @@ env_pop_tf(struct Trapframe *tf)
 {
 	// Record the CPU we are running on for user-space debugging
 	curenv->env_cpunum = cpunum();
-
+	
 	asm volatile(
 		"\tmovl %0,%%esp\n"
 		"\tpopal\n"
@@ -483,7 +593,36 @@ env_run(struct Env *e)
 	//	e->env_tf to sensible values.
 
 	// LAB 3: Your code here.
+	
+	// old_env have entered interrupt_handler, so we don't need to
+	// store its trapframe, we have stored its informations in traps
+	// when switch to this process, will resume its context from trapframe which stored before
+	
+	// 1. back to ENV_RUNNABLE
+	if (curenv != NULL) {
+		if (curenv->env_status == ENV_RUNNING)
+			curenv->env_status = ENV_RUNNABLE;
+		else if (curenv->env_status != ENV_RUNNING) {
+			panic("test!");
+		}
+	}
+	
+	// 2. set curenv to the new environment
+	curenv = e;
+	
+	// 3. set its status to ENV_RUNNING
+	e->env_status = ENV_RUNNING;
+	
+	// 4. update its env_runs counter
+	e->env_runs ++;
 
-	panic("env_run not yet implemented");
+	// 5. use lcr3() to switch address space
+	// remember that use physical addr instead of virtual address
+	lcr3((uint32_t)(PADDR(e->env_pgdir)));
+
+	// 6. pop_tf to resume context from kernel stack
+	env_pop_tf(&e->env_tf);
+
+	panic("this function should not be returned!");
 }
 

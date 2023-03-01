@@ -65,14 +65,47 @@ static const char *trapname(int trapno)
 	return "(unknown trap)";
 }
 
+void vector0();
+void vector1();
+void vector2();
+void vector3();
+void vector4();
+void vector5();
+void vector6();
+void vector7();
+void vector8();
+void vector9();
+void vector10();
+void vector11();
+void vector12();
+void vector13();
+void vector14();
+void vector15();
+void vector16();
+void vector17();
+void vector18();
+void vector19();
+void vector48();
 
 void
 trap_init(void)
 {
 	extern struct Segdesc gdt[];
 
-	// LAB 3: Your code here.
+	void *ptr[] = {vector0, vector1, vector2, vector3,
+				   vector4, vector5, vector6, vector7,
+				   vector8, vector9, vector10, vector11,
+				   vector12, vector13, vector14, vector15,
+				   vector16, vector17, vector18, vector19};
 
+	// LAB 3: Your code here.
+	for (size_t i = 0;i < 20; i++) {
+		SETGATE(idt[i], true, GD_KT, (uint32_t)ptr[i], 0);
+	}
+
+	// see GD_KT, it's a segment selector
+	SETGATE(idt[T_BRKPT], true, GD_KT, (uint32_t)vector3, 3);
+	SETGATE(idt[T_SYSCALL], true, GD_KT, (uint32_t)vector48, 3);
 	// Per-CPU setup 
 	trap_init_percpu();
 }
@@ -196,13 +229,42 @@ trap_dispatch(struct Trapframe *tf)
 		panic("unhandled trap in kernel");
 	else {
 		env_destroy(curenv);
+	switch(tf->tf_trapno) {
+	
+	case T_BRKPT: 
+		monitor(tf);
 		return;
+
+	case T_PGFLT: 
+		if ((tf->tf_cs & ((1 << 3) - 1)) == 0)
+			panic("happen in kernel!");
+		page_fault_handler(tf);
+		return;
+
+	case T_SYSCALL:
+		syscall(tf->tf_regs.reg_eax, 
+				tf->tf_regs.reg_edx,
+				tf->tf_regs.reg_ecx,
+				tf->tf_regs.reg_ebx,
+				tf->tf_regs.reg_edi,
+				tf->tf_regs.reg_esi);
+		return;
+
+	default:
+		// Unexpected trap: The user process or the kernel has a bug.
+		print_trapframe(tf);
+		if (tf->tf_cs == GD_KT)
+			panic("unhandled trap in kernel");
+		else {
+			env_destroy(curenv);
+			return;
+		}
 	}
 }
 
 void
 trap(struct Trapframe *tf)
-{
+{	
 	// The environment may have set DF and some versions
 	// of GCC rely on DF being clear
 	asm volatile("cld" ::: "cc");
@@ -269,8 +331,8 @@ page_fault_handler(struct Trapframe *tf)
 	fault_va = rcr2();
 
 	// Handle kernel-mode page faults.
+	// lab3 don't need to code here
 
-	// LAB 3: Your code here.
 
 	// We've already handled kernel-mode exceptions, so if we get here,
 	// the page fault happened in user mode.
